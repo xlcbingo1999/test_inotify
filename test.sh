@@ -1,11 +1,48 @@
 #!/bin/bash
-outputFile="/home/netlab/test_inotify/output.log"
-# 启动你的程序，并将其输出通过管道传递给while循环
-while IFS= read -r path; do
-    # 检查输出是否为一个有效的路径
-    if [ -n "$path" ]; then
-        # 执行ls命令，列出该路径下的内容
-        timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-        echo "[xlc_print] [$timestamp] $path" >> $outputFile
+currDir="/home/netlab/test_inotify"
+outputFile="$currDir/output.log"
+
+srceventPrefix="$currDir/data"
+targeteventPrefix="$currDir/targetData"
+srceventPrefixLen=${#srceventPrefix}
+targeteventPrefixLen=${#targeteventPrefix}
+
+formatArrLen=3
+
+rm -rf ${srceventPrefix}/*
+rm -rf ${targeteventPrefix}/*
+> ${outputFile}
+
+while IFS= read -r event; do
+    read -a arr <<< "$event"
+    if [ ${#arr[@]} != $formatArrLen ]; then
+        continue
     fi
-done < <(inotifywait -rme modify,attrib,move,close_write,create,delete,delete_self /home/netlab/test_inotify/data)
+    
+    changePath=${arr[0]}
+    changeType=${arr[1]}
+    changeFile=${arr[2]}
+
+    targetChangePath="${targeteventPrefix}${changePath:${srceventPrefixLen}}"
+    
+    srcChangeFile="${changePath}${changeFile}"
+    targetChangeFile="${targetChangePath}${changeFile}"
+
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "[$timestamp] changePath: ${changePath}; changeType: ${changeType}; changeFile: ${changeFile}" >> $outputFile
+
+    if [ ${changeType} == "CREATE" ]; then
+        if [ -f ${srcChangeFile} ]; then
+            cp ${srcChangeFile} ${targetChangePath}
+        fi
+    elif [ ${changeType} == "DELETE" ]; then
+        if [ -f ${targetChangeFile} ]; then
+            rm ${targetChangeFile}
+        fi
+    elif [ ${changeType} == "MODIFY" ]; then
+        if [ -f ${srcChangeFile} ]; then
+            diff --unified ${targetChangeFile} ${srcChangeFile} | patch ${targetChangeFile}
+        fi
+    fi
+
+done < <(inotifywait -rme modify,move,create,delete,delete_self ${srceventPrefix})
